@@ -1,0 +1,139 @@
+---
+title: "Beverton-Holt"
+author: "Todor Dimitrov"
+date: "8/15/2019"
+output: html_document
+---
+# Stock-Recruit Model
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Purpose
+
+The purpose of this project was to create a basic model that could take idealistic simulated data, fit a Beverton-Holt curve, and estimate productivity and capacity with a high degree of accuracy. Furthermore, a state-based approach was used to better fit the spawner-recruit relationship.
+
+# Simulating Data
+
+### Parameters and functions:
+
+The Beverton-Holt equation is a population model which takes in the spawner count, productivity (slope at origin), and capacity of the population. The equation used in our model was as follows:
+```{r bevholt}
+bevholt = function(S, prod, cap) {
+  S/(1/prod+S/cap)
+}
+```
+
+This gives the recruits given the initial spawner count. Using this we were able to simulate 100 years (N) of population data. We used an initial state of 1000 individuals in the population (S[1]) with a capacity of 1200 (cap) and a productivity of 2.5 (prod). We assumed that the observation standard deviation was known (0.15). Furthermore, to avoid clustering of data we added a known ocean survival rate ranging from .2 to 1. Using those values we were able to simulate data using a state-based approach.
+
+Process Model:
+```{r process model}
+N <- 100
+OS <- rep(c(.2,.4,.8,.6,1), rep(N/5,5))
+S <- numeric(N)
+S[1] <- 1000
+cap <- 1200
+prod <- 2.5
+for (i in 1:(N-1)){
+  S[i+1] <- rlnorm(1, log(bevholt(S[i], prod, cap)*OS[i]), 0.1)
+}
+```
+
+Observation Model:
+```{r obs model}
+Sobs <- numeric(N)
+for (i in 1:N) {
+  Sobs[i] <- rlnorm(1, log(S[i]), .15)
+}
+```
+This observed data was then passed into the JAGS model.
+
+The following is an example of what the simulated data resembled:
+```{r data plot}
+plot(S[-100],S[-1]/OS[-1], xlab="spawner", ylab="recruitment", main="Sample Data")
+```
+
+## Jags Model
+
+The model was created using JAGS. The observed generated data, number of years of data, and the ocean survival rate each year were all data passed into the model. We assumed a lognormal distribution for the priors of both productivity and capacity and a gamma prior for tau. Again, we assumed that the observation precision was known (.15). 
+```{r jags code}
+mod.bug <- '
+model {
+  S[1] ~ dlnorm(0,0.0001)
+  for(i in 1:(Nyears-1)) {
+    S[i+1] ~ dlnorm(log((S[i]/(1/prod + S[i]/cap))*OS[i]), tau)
+  }
+  
+  for (i in 1:Nyears) {
+    Sobs[i] ~ dlnorm(log(S[i]),1/(.15*.15))
+  }
+  
+  prod ~ dlnorm(log(3), 0.01)   
+  cap ~ dlnorm(log(15000), 0.001)
+	tau ~ dgamma(0.001, 0.001)
+}
+'
+tmpf=tempfile()
+tmps=file(tmpf,"w")
+cat(mod.bug,file=tmps)
+close(tmps)
+```
+
+We were able to run the model with initial values of prod = 1 and cap = 600 in R using the following code:
+```{r fit model}
+library('rjags')
+initValFunc <- function() {
+  list(prod=1, cap=600)
+}
+
+jagsDat <- list(Sobs=Sobs, Nyears=100, OS=OS)
+m1 <- jags.model(textConnection(mod.bug), data=jagsDat, initValFunc, n.chains=3, n.adapt=5000)
+s1 <- jags.samples(m1,n.iter=10000,variable.names=c("prod","cap", "tau", "S"))
+prodLi <- s1$prod
+capLi <- s1$cap
+sigmaLi <- sqrt(1/s1$tau)
+last <- s1$S
+median(prodLi)
+median(capLi)
+```
+
+As we can tell from the last two lines, the JAGS model was able to approximate the true values for productivity and capacity with a relatively high degree of accuracy.
+
+## Further Extensions 
+
+Using this new posterior distribution for both parameters we can now generate predictions for future years. To do this, first, we randomly sample the productivity and capacity. Then, we use the generative model to iterate through the desired number of years. The initial value of the population can be altered. First, we used the final spawner count from the JAGS model as the initial population.
+```{r future data}
+Ndraws <- 5
+for (i in 1:Ndraws) {
+  draw <- sample(1:length(prodLi), 1)
+  Sp <- numeric(N)
+  Sp[1] <- last[draw*100]
+  for (yr in 1:(N-1)){
+    Sp[yr+1] <- rlnorm(1, log(bevholt(Sp[yr], prodLi[draw], capLi[draw])), sigmaLi[draw])
+  }
+  if (i == 1) {
+    plot(Sp, type = "l", col = i, ylim = c(0, 1500), lwd = 3)  
+  } else {
+    lines(Sp, type = "l", col = i)
+  }
+}
+```
+
+Then, we set a fixed initial value of 1000 and predicted future data using sampled capacity and productivity. The following was the result.
+```{r future fixed}
+for (i in 1:Ndraws) {
+  draw <- sample(1:length(prodLi), 1)
+  Sp <- numeric(N)
+  Sp[1] <- 1000
+  for (yr in 1:(N-1)){
+    Sp[yr+1] <- rlnorm(1, log(bevholt(Sp[yr], prodLi[draw], capLi[draw])), sigmaLi[draw])
+  }
+  if (i == 1) {
+    plot(Sp, type = "l", col = i, ylim = c(0, 1500), lwd = 3)  
+  } else {
+    lines(Sp, type = "l", col = i)
+  }
+}
+```
+
+

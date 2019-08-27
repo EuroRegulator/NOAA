@@ -1,0 +1,14 @@
+model {
+  S[1] ~ dlnorm(0,0.0001)
+  for(i in 1:(Nyears-1)) {
+    S[i+1] ~ dlnorm(log((S[i]/(1/prod + S[i]/cap))*OS[i]), tau)
+  }
+  
+  for (i in 1:Nyears) {
+    Sobs[i] ~ dlnorm(log(S[i]),1/(.15*.15))
+  }
+  
+  prod ~ dlnorm(log(3), 0.01)   
+  cap ~ dlnorm(log(15000), 0.001)
+	tau ~ dgamma(0.001, 0.001)
+}
