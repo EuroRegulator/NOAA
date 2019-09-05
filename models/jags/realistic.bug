@@ -1,7 +1,7 @@
 model {
   S[1] ~ dlnorm(0,0.0001)
   for(i in 1:(Nyears-1)) {
-    S[i+1] ~ dlnorm(log((S[i]/(1/prod + S[i]/cap))*(1/(1-Pha[i]))*(1-HR[i])), tau)
+    S[i+1] ~ dlnorm(log((S[i]/(1/prod + S[i]/cap))*(1/(1-Phas[i]))*(1-HR[i])), tau)
   }
   
   for (i in 1:Nyears) {

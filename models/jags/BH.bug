@@ -1,10 +1,10 @@
 model {
-  for (i in 1:Nyears) {
-    R[i] ~ dnorm(log(mu[i]), tau)
+  for (i in 1:(Nyears-1)) {
+    R[i] ~ dlnorm(log(mu[i]), tau)
     mu[i] <- S[i]/(1/prod + S[i]/cap)
   }
-  prod ~ dunif(0, 20)
-  cap ~ dunif(0, 30000) # (0, 100) for simulated data 
-  sigma ~ dunif(0, 100) # standard deviation
-	tau <- 1 / (sigma * sigma) # sigma^2 doesn't work in JAGS
+  
+  prod ~ dlnorm(log(3), 0.01)   
+  cap ~ dlnorm(log(15000), 0.001)
+  tau ~ dgamma(0.001, 0.001) 
 }

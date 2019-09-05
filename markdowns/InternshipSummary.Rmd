@@ -1,0 +1,390 @@
+---
+title: "Modelling the Stock-Recruitment relationship"
+author: "Todor Dimitrov"
+date: "8/28/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library('rjags')
+options(knitr.table.format = 'markdown')
+```
+
+## Introduction
+ <br />
+Estimating and modeling the stock-recruitment relationship has been a central issue in fishery dynamics. Over the years, a wide variety of suggestions and solutions have appeared to fit and estimate critical parameters. These span from drawing recruitment curves by eye to a strictly statistical procedure of curve fitting ^[Walters and Ludwig 1981]. While each approach has its own validity and use, Bayesian methodology and state-space modelling have become the prominent focus of more recent literature ^[Clark and Bjørnstad 2004]. Through this paper, we aim to highlight the benefits of combining both methodologies with regards to fishery population dynamics.
+ <br />
+ 
+### State-space Framework
+ <br />
+As models have developed over time, focus has shifted from simply fitting a curve to assuring that key sources of error have been considered and included ^[Walters and Ludwig 1981]. In particular, the importance of both observation error and process variability has become increasingly recognized in within fishery literature ^[Ahrestani, Hebblewhite, and Post 2013]. Observation error, as one would expect, results in variability in the methods used to obtain population growth. Source of observation error include sampling error as well as human error and harsh environmental conditions. On the other hand, process error models the random error in the state equation being used ^[Miller and Meyer 1999].A state-space model aims to separate the two sources of error to better simulate and analyze them. 
+ <br />
+  
+#### Basic State-space model
+ <br />
+Let $x_t$ be a population state at time $t$ and $y_t$ represent the observation made. The state-space model is therefore as follows:
+ <br /> <br />
+ <center>
+  $x_t = f(x_{t-1}) + \epsilon_t$
+ <br />
+  $y_t = g(x_t) + \omega_t$
+  </center>
+ <br />
+Through this framework, we are able of separating the two sources of error: $\epsilon_t$ (Process Error) and $\omega_t$ (Observation error). The first equation is our process equation while the second is our observation equation. With some minor alterations, this framework will be the guiding principle behind our stock-recruitment model. In particular, we will focus on the log densities of the states ($x_t = ln(n_t)$). This, with the assumptions that $\epsilon_t \sim N(0, \sigma^2)$ and $\omega_t \sim N(0, \tau^2)$ will give us a lognormal distribution for both the process and observation models. In terms of functions we will use the Beverton-Holt equation, a population model which takes in the spawner count, productivity (slope at origin), and capacity of the population. There are many other choices, such as the Ricker model, but for our study we decided to focus on the Beverton-Holt function.
+ <br /> <br />
+<center>$f(S) = \frac{S}{\frac{1}{p} + \frac{S}{c}}$</center>
+ <br />
+<center>$g(x) = x$</center>
+ <br />
+Here $p$ represents productivity, $c$ is capacity, and $S$ is the spawner count. Using this basic framework, we can accurately incorporate both observation and process error into our model. 
+ <br />
+ 
+## Models
+
+In this section we will discuss two models in particular:
+ <br />
+<center>
+1. Simple model only using Beverton-Holt equation.
+ <br />
+2. Bayesian state space model.
+ <br />
+3. Modeling with varied process errors.
+ <br />
+</center>
+
+### Data Generation
+First, to illustrate and be able to test the validity of our models, we needed a testing data set. Using the state space model outlined in the previous section, we were able to simulate 100 years of population data. We used an initial state of 1000 individuals in the population with a capacity of 1200 and a productivity of 2.5. We assumed that the observation error was known ($\omega_t = 0.15$) as well as process error ($\epsilon_t = 0.1$). Furthermore, to avoid clustering of data we added a known harvest rate ($HR$), ranging from 0 to 0.63. We also added a percentage of hatchery fish which entered the wild ($Phas$). This value ranged from 0 to 0.9.
+
+Process Model:
+```{r process model}
+bevholt = function(S, prod, cap) {
+  S/(1/prod+S/cap)
+}
+
+set.seed(123)
+N <- 100
+Phas <- sample(rep(seq(0, .9, .1), rep(N/10,10)))
+HR <- sample(rep(seq(0, .63, .07), rep(N/10,10)))
+S <- numeric(N)
+S[1] <- 1000
+cap <- 1200
+prod <- 2.5
+for (i in 1:(N-1)){
+  S[i+1] <- rlnorm(1, log(bevholt(S[i], prod, cap)*(1-HR[i])/(1-Phas[i])), .1)
+}
+```
+Observation Model:
+```{r obs model}
+Sobs <- numeric(N)
+for (i in 1:N) {
+  Sobs[i] <- rlnorm(1, log(S[i]), .15)
+}
+```
+
+The following plots are that of the 'actual' data generated and the observed data:
+```{r data plot,out.width = '75%', fig.height= 9, fig.align = "center"}
+par(mfrow=c(2,1))
+plot(Sobs[-100],Sobs[-1]*(1-Phas[-100])/(1-HR[-100]), xlab="spawner", ylab="recruitment", main="Processed Data", ylim = c(0,2000))
+plot(Sobs[-100],Sobs[-1], xlab="spawner", ylab="recruitment", main="Observed Data")
+
+```
+
+### Simple Model (Non State-based)
+
+Part of creating a accurate Bayesian stock model is careful consideration of the priors. For some parameters guidance can be found in past literature ^[Miller and Meyer 1999]. In our case, since we simulated our data, we are going to assume that the following are reasonable priors:
+<center>
+$pro \sim lognormal(log(3), 0.01)$
+<br />
+$cap \sim lognormal(log(15000), 0.001))$
+<br />
+$\tau \sim gamma(0.001, 0.001)$
+</center>
+Here, $\tau = \frac{1}{\sigma^2}$
+<br />
+Now, using JAGS, we can create our simple model. Here, we attempt to model using only the observed data.
+<br />
+```{r jags code}
+simple.bug <- '
+model {
+  for (i in 1:(Nyears-1)) {
+    R[i] ~ dlnorm(log(mu[i]), tau)
+    mu[i] <- S[i]/(1/prod + S[i]/cap)
+  }
+  
+  prod ~ dlnorm(log(3), 0.01)   
+  cap ~ dlnorm(log(15000), 0.001)
+  tau ~ dgamma(0.001, 0.001) 
+}
+'
+```
+<br />
+We are then able to run the model with initial values of prod = 1 and cap = 600. These models usually account for given harvest rates and hatchery proportions. Because of this we transformed the data before running the model.
+<br />
+```{r fit simple model}
+initValFunc <- function() {
+  list(prod=1, cap=600)
+}
+jagsDat <- list(S=Sobs[-100], R=Sobs[-1]*(1-Phas[-100])/(1-HR[-100]), Nyears=N)
+m.simple <- jags.model(textConnection(simple.bug), data=jagsDat, initValFunc, n.chains=3)
+s.simple <- jags.samples(m.simple,n.iter=10000,variable.names=c("prod","cap", "tau"))
+prodLi <- s.simple$prod
+capLi <- s.simple$cap
+sigmaLi <- sqrt(1/s.simple$tau)
+U <- 1-1/sqrt(prodLi)
+median(prodLi)
+median(capLi)
+```
+<br />
+This model generates a reasonable results. By sampling from the posterior distribution of the parameters, we can see the median of productivity and capacity are around the set values we used to generate the data. To get a sense of the wide range of plausible curves, we can plot multiple Beverton-Holt curves using sample capacities and productivity. The 1:1 reference line was plotted as well.
+<br />
+```{r simple range}
+par(mfrow = c(1,1))
+plot(Sobs[-100],Sobs[-1]*(1-Phas[-100])/(1-HR[-100]), ylim = c(100,1800), xlab="spawner", ylab="recruitment", main="Simple Model")
+SS <- 0:10000
+Ndraws <- 100
+for (i in 1:Ndraws) {
+  draw <- sample(1:length(prodLi), 1)
+  lines(SS, bevholt(SS, prodLi[draw], capLi[draw]), type = "l", col = 2, lwd = .5)  
+}
+lines(SS, bevholt(SS, median(prodLi), median(capLi)), type = "l", col = 1, lwd = 4)  
+lines(SS, SS)
+```
+<br />
+A value which fisheries mangers are often interested in is the maximum sustainable yield (MSY), or the maximum value at which a population can be harvested at without long-term depletion or extinction. From past literature we know that the MSY of a Beverton-Holt curve is calculated as $1-\frac{1}{prod}$. Using this formula, we can find the MSY for all the samples from the posterior and create a 95% credible interval.
+<br />
+<center>
+``` {r MSY simple}
+hist(U, main = "MSY of simple model")
+abline(v = quantile(U,prob=c(0.025,0.5,0.975)), col="red", lwd=3, lty=2)
+quantile(prodLi,prob=c(0.025,0.5,0.975))
+```
+</center>
+<br />
+A similar procedure can be done for productivity and capacity.
+<br />
+<center>
+``` {r Prod and cap simple, echo=FALSE}
+par(mfrow = c(1,2))
+hist(prodLi, main = "Productivity of simple model")
+abline(v = quantile(prodLi,prob=c(0.025,0.5,0.975)), col="red", lwd=3, lty=2)
+hist(capLi, main = "Capacity of simple model")
+abline(v = quantile(capLi,prob=c(0.025,0.5,0.975)), col="red", lwd=3, lty=2)
+```
+</center>
+<br />
+Ultimately, what we see is that the simple model does a relatively accurate job of bounding the parameters as well as estimating values such as MSY. However, once again, this model was under ideal conditions (large quantities of data, relatively small error) and does not incorporate or take into account the different forms of error which occur from generating these observations.
+<br />
+
+### State-based Model
+
+<br />
+Now, we will look at a state-based model under the same conditions as the simple model. We are using the same generated data and priors as above. However, now, in our model, we will explicitly model the process and the observation. Here, we will assume that observation error has been measured and is known.
+<br />
+
+```{r jags state code}
+state.bug <- '
+model {
+  S[1] ~ dlnorm(0,0.0001)
+  for(i in 1:(Nyears-1)) {
+    S[i+1] ~ dlnorm(log((S[i]/(1/prod + S[i]/cap))*(1/(1-Phas[i]))*(1-HR[i])), tau)
+  }
+  
+  for (i in 1:Nyears) {
+    Sobs[i] ~ dlnorm(log(S[i]),1/(.15*.15))
+  }
+  
+  prod ~ dlnorm(log(3), 0.01)   
+  cap ~ dlnorm(log(15000), 0.001)
+  tau ~ dgamma(0.001, 0.001)
+}
+'
+```
+<br />
+Using a similar process as above we can run the model with initial values of prod = 1 and cap = 600.
+<br />
+```{r fit state model}
+jagsDat <- list(Sobs=Sobs, Nyears=N, Phas=Phas, HR=HR)
+m.state <- jags.model(textConnection(state.bug), data=jagsDat, initValFunc, n.chains=3, n.adapt=5000)
+s.state <- jags.samples(m.state,n.iter=10000,variable.names=c("prod","cap", "tau", "S"))
+prodLi <- s.state$prod
+capLi <- s.state$cap
+sigmaLi <- sqrt(1/s.state$tau)
+U <- 1-1/sqrt(prodLi)
+median(prodLi)
+median(capLi)
+```
+<br />
+A sample of parameters were used to plot Beverton-Holt curves to see the spread.
+<br />
+```{r state range, echo=FALSE}
+par(mfrow = c(1,1))
+plot(Sobs[-100],Sobs[-1]*(1-Phas[-100])/(1-HR[-100]), ylim = c(100,1800), xlab="spawner", ylab="recruitment", main="Simple Model")
+SS <- 0:10000
+Ndraws <- 100
+for (i in 1:Ndraws) {
+  draw <- sample(1:length(prodLi), 1)
+  lines(SS, bevholt(SS, prodLi[draw], capLi[draw]), type = "l", col = 2, lwd = .5)  
+}
+lines(SS, bevholt(SS, median(prodLi), median(capLi)), type = "l", col = 1, lwd = 4)  
+lines(SS, SS)
+```
+<br />
+A summary of the the parameter posterior distributions as well as MSY can be quickly calculated. Once again, the 95% credible intervals as well as the medians of each distributions are plotted. First the calculated values.
+<br />
+<center>
+``` {r MSY state, echo=FALSE}
+hist(U, main = "MSY of simple model")
+abline(v = quantile(U,prob=c(0.025,0.5,0.975)), col="red", lwd=3, lty=2)
+quantile(prodLi,prob=c(0.025,0.5,0.975))
+```
+</center>
+<br />
+The parameters:
+<br />
+<center>
+``` {r Prod and cap state, echo=FALSE}
+par(mfrow = c(1,2))
+hist(prodLi, main = "Productivity of simple model")
+abline(v = quantile(prodLi,prob=c(0.025,0.5,0.975)), col="red", lwd=3, lty=2)
+hist(capLi, main = "Capacity of simple model")
+abline(v = quantile(capLi,prob=c(0.025,0.5,0.975)), col="red", lwd=3, lty=2)
+```
+</center>
+<br />
+The credible intervals for the parameters are a bit tighter around the true values, however, under these ideal conditions, both models do a accurate job of estimating the parameter values.
+
+### Varying Process error
+
+<br />
+We will now take a look at how varying the process error effects each models accuracy for predicting parameters. To perform this, we generate data using a similar process as seen above, simply varying the used process error from $0.1$ to $0.7$. In fisheries modeling, this source of error could be caused from poor knowledge of or lack of sufficient information about the processes at hand. The following graphs and table summarize the results from varying process error
+<br />
+```{r process error variation, echo=FALSE, results='hide'}
+set.seed(123)
+N <- 100
+Phas <- sample(rep(seq(0, .9, .1), rep(N/10,10)))
+HR <- sample(rep(seq(0, .63, .07), rep(N/10,10)))
+S <- numeric(N)
+PErr <- seq(.1, .7, .1)
+dataState <- numeric(35)
+dataCompStat <- matrix(1:(30000*14),30000,14)
+SobsDat <- matrix(1:(100*7), 100, 7)
+for (j in 1:7) {
+  S[1] <- 1000
+  cap <- 1200
+  prod <- 2.5
+  for (i in 1:(N-1)){
+    S[i+1] <- rlnorm(1, log(bevholt(S[i], prod, cap)*(1-HR[i])/(1-Phas[i])), PErr[j])
+  }
+  
+  #observation model
+  Sobs <- numeric(N)
+  for (i in 1:N) {
+    Sobs[i] <- rlnorm(1, log(S[i]), .15)
+  }
+  SobsDat[1:100,j] <- Sobs
+}
+
+for (j in 1:7) {
+  jagsDat <- list(Sobs=SobsDat[1:100,j], Nyears=N, Phas=Phas, HR=HR)
+  m1 <- jags.model(textConnection(state.bug), data=jagsDat, initValFunc, n.chains=3, n.adapt=5000)
+  s1 <- jags.samples(m1,n.iter=10000,variable.names=c("prod","cap", "tau", "S"))
+  prodLi <- s1$prod
+  capLi <- s1$cap
+  sigmaLi <- sqrt(1/s1$tau)
+  dataCompStat[1:30000,2*j] <- capLi
+  dataCompStat[1:30000,2*j-1] <- prodLi
+  dataState[5*j] <- median(sigmaLi)
+  dataState[5*j-1] <- sd(capLi)
+  dataState[5*j-2] <- sd(prodLi)
+  dataState[5*j-3] <- median(capLi)
+  dataState[5*j-4] <- median(prodLi) 
+}
+tState <- matrix(dataState,ncol=7,byrow=FALSE)
+colnames(tState) <- c("1","2","3","4","5","6","7")
+rownames(tState) <- c("Prod Median", "Cap Median", "Prod sd", "Cap sd", "Estimated Process error")
+tState <- as.table(tState)
+
+dataSimple <- numeric(28)
+dataCompSimp <- matrix(1:(30000*14),30000,14)
+for (j in 1:7) {
+  Sobs <- SobsDat[1:100,j]
+  jagsDat <- list(S=Sobs[-100], R=Sobs[-1]*(1-Phas[-100])/(1-HR[-100]), Nyears=N)
+  m2 <- jags.model(textConnection(simple.bug), data=jagsDat, initValFunc, n.chains=3, n.adapt=5000)
+  s2 <- jags.samples(m2,n.iter=10000,variable.names=c("prod","cap"))
+  prodLi <- s2$prod
+  capLi <- s2$cap
+  dataCompSimp[1:30000,2*j] <- capLi
+  dataCompSimp[1:30000,2*j-1] <- prodLi
+  dataSimple[4*j] <- sd(capLi)
+  dataSimple[4*j-1] <- sd(prodLi)
+  dataSimple[4*j-2] <- median(capLi)
+  dataSimple[4*j-3] <- median(prodLi) 
+}
+tSimple <- matrix(dataSimple,ncol=7,byrow=FALSE)
+colnames(tSimple) <- c("1","2","3","4","5","6","7")
+rownames(tSimple) <- c("Prod Median", "Cap Median", "Prod sd", "Cap sd")
+tSimple <- as.table(tSimple)
+
+```
+
+
+<center>
+```{r process error variation plots, echo=FALSE}
+par(mfrow = c(1,2))
+for (j in 1:7) {
+  prodLi <- dataCompStat[1:30000,2*j-1]
+  capLi <- dataCompStat[1:30000,2*j]
+  Sobs <- SobsDat[1:100,j]
+  plot(Sobs[-100],Sobs[-1]*(1-Phas[-100])/(1-HR[-100]), ylim = c(100,1800), xlab="spawner", ylab="recruitment", main=paste("State Model Process Error =",PErr[j]))
+  SS <- 0:20000
+  Ndraws <- 100
+  for (i in 1:Ndraws) {
+    draw <- sample(1:length(prodLi), 1)
+    lines(SS, bevholt(SS, prodLi[draw], capLi[draw]), type = "l", col = 2, lwd = .5)  
+  }
+  lines(SS, bevholt(SS, median(prodLi), median(capLi)), type = "l", col = 1, lwd = 4)  
+  lines(SS, SS)
+  
+  prodLi <- dataCompSimp[1:30000,2*j-1]
+  capLi <- dataCompSimp[1:30000,2*j]
+  Sobs <- SobsDat[1:100,j]
+  plot(Sobs[-100],Sobs[-1]*(1-Phas[-100])/(1-HR[-100]), ylim = c(100,1800), xlab="spawner", ylab="recruitment", main=paste("Simple Model Process Error =",PErr[j]))
+  SS <- 0:20000
+  Ndraws <- 100
+  for (i in 1:Ndraws) {
+    draw <- sample(1:length(prodLi), 1)
+    lines(SS, bevholt(SS, prodLi[draw], capLi[draw]), type = "l", col = 2, lwd = .5)  
+  }
+  lines(SS, bevholt(SS, median(prodLi), median(capLi)), type = "l", col = 1, lwd = 4)  
+  lines(SS, SS)
+}
+```
+<br />
+State Model
+<br />
+```{r state table, echo=FALSE}
+knitr::kable(
+  tState, caption = 'State Model Results'
+)
+```
+<br />
+Simple Model
+<br />
+```{r simple table, echo=FALSE}
+knitr::kable(
+  tSimple, caption = 'Simple Model Results'
+)
+```
+</center>
+
+<br />
+From the tables above we can see that both models struggle to fit the curves when process error gets large. This can also be seen in the graphs by the larger spread of the drawn curves. However, the clear advantage of the state-based approach is that it does an accurate job of modeling the process error. In other words, the state-based model is more informative. 
+<br />
+
+## Discussion
+
+<br />
+Throughout this paper we generated a simple set of spawner-recruit data and fit a Beverton-Holt curve using both a state-based approach and a direct model. Then, we varied the process error in the generated data to see the differences with each approach.
+<br />
+Ultimately, what we saw was that a lack of incorporation of both process and observation error within a model can lead to increased variability in parameter estimation. Furthermore, even with an abundance of data, models which do not take into account both sources of error can be highly uncertain and be extremely sensitive to model assumptions ^[Clark and Bjørnstad 2004]. The biggest issue of keeping models simple is being incapable of capturing larger complexities. While a simple model may be a great fit for the collected data, often, as seen by the uncertainty, will not do a good job of modeling the true relationship. When we raised process error, we saw exactly this. While both models had increased variability in the parameter posteriors, the state-based approach was able to capture the process error. In other words, the ability to capture these different forms of error is what makes the state-based approach superior to the simple model.

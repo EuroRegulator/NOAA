@@ -2,7 +2,7 @@
 data {
   int<lower=0> Nyears;
   vector[Nyears] Sobs;
-  vector[Nyears] Pha;
+  vector[Nyears] Phas;
   vector[Nyears] HR;
 }
 
@@ -17,7 +17,7 @@ transformed parameters {
   real S[Nyears];
   S[1] = 1000;
   for (i in 1:(Nyears-1)) {
-    S[i+1] = (S[i]/(1/pro + S[i]/cap))*(1/(1-Pha[i]))*(1-HR[i]) * exp(sigma* S_raw[i]);
+    S[i+1] = (S[i]/(1/pro + S[i]/cap))*(1/(1-Phas[i]))*(1-HR[i]) * exp(sigma* S_raw[i]);
     //print("i = ", i, ", pro=", pro, " cap=", cap," Si+1= ", S[i+1]);
   }
 }

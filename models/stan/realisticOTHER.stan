@@ -2,7 +2,7 @@
 data {
   int<lower=0> Nyears;
   vector[Nyears] Sobs;
-  vector[Nyears] Pha;
+  vector[Nyears] Phas;
   vector[Nyears] HR;
 }
 
@@ -20,7 +20,7 @@ model {
   
   S[1] ~ lognormal(log(1000), .001);
   for(i in 1:(Nyears-1)) { 
-    S[i+1] ~ lognormal(log((S[i]/(1/pro + S[i]/cap))*(1/(1-Pha[i]))*(1-HR[i])), sigma);
+    S[i+1] ~ lognormal(log((S[i]/(1/pro + S[i]/cap))*(1/(1-Phas[i]))*(1-HR[i])), sigma);
   }
   
   Sobs ~ lognormal(log(S),.15);
