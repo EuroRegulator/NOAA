@@ -1,0 +1,26 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1568171631971.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "3502251641",
+    "id" : "617F0338",
+    "lastKnownWriteTime" : 1568172541,
+    "last_content_update" : 1568172541873,
+    "path" : "~/FisheryBasics/R/FisheryBasics.R",
+    "project_path" : "R/FisheryBasics.R",
+    "properties" : {
+        "cursorPosition" : "3,107",
+        "scrollLine" : "0",
+        "tempName" : "Untitled1"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 3,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

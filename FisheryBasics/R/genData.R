@@ -1,0 +1,56 @@
+#' Generate Sample Data
+#'
+#' Generates example data which can be used with the models within the package. If any of Nyears,
+#' pHOS or HR are null then all three take on default values. If processErr is null takes on .1, if
+#' obsErr is null takes on .15.
+#'
+#' @param Nyears Number of years to generate
+#' @param pHOS Vector contianing proportion of naturally spawning hatchery fish
+#' @param HR Vector containing harvest rate for every year
+#' @param processErr Process Error
+#' @param obsErr Observation Error
+#'
+#' @return a vector of length Nyears containing the generated data
+#'
+#' @examples
+#' N <- 100
+#' pHOS <- sample(rep(seq(0, .9, .1), rep(N/10,10)))
+#' HR <- sample(rep(seq(0, .63, .07), rep(N/10,10)))
+#' processErr <- .1
+#' obsErr <- .15
+#' genData(N, pHOS, HR, processErr, obsErr)
+#'
+#' @export
+genData <- function(Nyears, pHOS, HR, processErr, obsErr, ...) {
+  bevholt = function(S, prod, cap) {
+    S/(1/prod+S/cap)
+  }
+
+  N <- Nyears
+  #process model
+  if (is.null(Nyears) | is.null(pHOS) | is.null(HR)) {
+    N <- 100
+    pHOS <- sample(rep(seq(0, .9, .1), rep(N/10,10)))
+    HR <- sample(rep(seq(0, .63, .07), rep(N/10,10)))
+  }
+  if (is.null(processErr)) {
+    processErr <- .1
+  }
+  if (is.null(obsErr)) {
+    obsErr <- .15
+  }
+  S <- numeric(N)
+  S[1] <- 1000
+  cap <- 1200
+  prod <- 2.5
+  for (i in 1:(N-1)){
+    S[i+1] <- rlnorm(1, log(bevholt(S[i], prod, cap)*(1-HR[i])/(1-pHOS[i])), processErr)
+  }
+
+  #observation model
+  Sobs <- numeric(N)
+  for (i in 1:N) {
+    Sobs[i] <- rlnorm(1, log(S[i]), obsErr)
+  }
+  return(Sobs)
+}
